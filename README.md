@@ -1,3 +1,3 @@
 # kurt_adam
 
-A new Flutter project.
+Arkadaşlarınızla beraber vampir köylü oynamaktan sıkıldınız mı? İşte tamamen farklı olan bir oyun burada.
