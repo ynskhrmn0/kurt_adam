@@ -15,7 +15,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Vampir Köylü Oyunu',
+      title: 'Kurt Adam Oyunu',
       theme: ThemeData.dark(),
       home: MyHomePage(),
     );

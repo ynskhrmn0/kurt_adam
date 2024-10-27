@@ -31,6 +31,9 @@ class _GameScreenState extends State<GameScreen> {
     'bomber': Colors.black,
   };
 
+  bool _hasMatchmakerActed = false;
+  String? _seerCurrentTarget;
+  bool _showCurrentSeerDiscovery = false;
   String? _wolfTarget;
   String? _doctorSelfHeal;
   String? _doctorTarget;
@@ -106,6 +109,13 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  String? _getMatchedPartner(String player) {
+    if (_matchedPlayers.contains(player)) {
+      return _matchedPlayers.firstWhere((p) => p != player);
+    }
+    return null;
+  }
+
   void _setupNightQueue() {
     _currentNightQueue.clear();
 
@@ -118,27 +128,29 @@ class _GameScreenState extends State<GameScreen> {
       'seer'
     ];
 
+    // İlk gece kontrolü için bir flag ekleyelim
+    bool isFirstNight = !_hasMatchmakerActed;
+
     for (String roleId in roleOrder) {
       if (roleId == 'wolf') {
-        // Kurt rolüne sahip tüm oyuncuları bul
         _wolfPlayers = _playerRoles.entries
             .where((entry) =>
                 entry.value.id == 'wolf' && !_deadPlayers.contains(entry.key))
             .map((entry) => entry.key)
             .toList();
 
-        // Eğer hayatta olan kurt varsa, sıraya ekle
         if (_wolfPlayers.isNotEmpty) {
-          _currentNightQueue
-              .add(_wolfPlayers.first); // Sadece bir kurt ekliyoruz
+          _currentNightQueue.add(_wolfPlayers.first);
         }
       } else {
-        // Diğer roller için normal kontrol
         for (var entry in _playerRoles.entries) {
           if (entry.value.id == roleId && !_deadPlayers.contains(entry.key)) {
-            if (roleId == 'thief' && _currentNightQueue.isEmpty) {
-              _currentNightQueue.add(entry.key);
-            } else if (roleId == 'matchmaker' && _matchedPlayers.isEmpty) {
+            // Çöpçatan kontrolü - sadece ilk gece ekle
+            if (roleId == 'matchmaker') {
+              if (isFirstNight) {
+                _currentNightQueue.add(entry.key);
+              }
+            } else if (roleId == 'thief' && _currentNightQueue.isEmpty) {
               _currentNightQueue.add(entry.key);
             } else if (roleId != 'thief' && roleId != 'matchmaker') {
               _currentNightQueue.add(entry.key);
@@ -158,7 +170,6 @@ class _GameScreenState extends State<GameScreen> {
 
     if (_isVoting) {
       setState(() {
-        // Eğer zaten seçili olan kişiye tıklandıysa seçimi kaldır
         if (_selectedForVote == player) {
           _selectedForVote = null;
         } else {
@@ -173,11 +184,27 @@ class _GameScreenState extends State<GameScreen> {
     final currentRole = _playerRoles[_currentActor]?.id;
 
     setState(() {
+      if (currentRole == 'matchmaker') {
+        if (_matchedPlayers.contains(player)) {
+          // Eğer seçili oyuncu zaten seçilmişse, seçimi iptal et
+          setState(() {
+            _matchedPlayers.remove(player);
+            _selectedPlayer = null;
+          });
+        } else if (_matchedPlayers.length < 2 && player != _currentActor) {
+          // Eğer oyuncu seçili değilse ve limit dolmamışsa, oyuncuyu seç
+          _matchedPlayers.add(player);
+          _selectedPlayer = player;
+          if (_matchedPlayers.length == 2) {
+            _hasMatchmakerActed = true;
+          }
+        }
+        return;
+      }
+
       if (_selectedPlayer == player) {
         _selectedPlayer = null;
-        _currentTarget =
-            null; // Seçimi iptal ettiğimizde hedefi de temizleyelim
-        // Role özgü seçimleri iptal et
+        _currentTarget = null;
         switch (currentRole) {
           case 'wolf':
             _wolfTarget = null;
@@ -187,9 +214,6 @@ class _GameScreenState extends State<GameScreen> {
             if (player == _currentActor) {
               _doctorSelfHeal = null;
             }
-            break;
-          case 'matchmaker':
-            _matchedPlayers.remove(player);
             break;
           case 'bomber':
             _bomberTargets.remove(player);
@@ -202,9 +226,16 @@ class _GameScreenState extends State<GameScreen> {
       _currentTarget = player;
 
       switch (currentRole) {
+        case 'seer':
+          if (!_seerDiscoveries.containsKey(player)) {
+            _seerCurrentTarget = player;
+            _showCurrentSeerDiscovery = false;
+          }
+          break;
+
         case 'wolf':
           if (player != _currentActor && !_wolfPlayers.contains(player)) {
-            _wolfTarget = player; // Hedefi kaydet ama hemen öldürme
+            _wolfTarget = player;
             _selectedPlayer = player;
           }
           break;
@@ -218,20 +249,6 @@ class _GameScreenState extends State<GameScreen> {
             _doctorSelfHeal = player;
           }
           _doctorTarget = player;
-          break;
-
-        case 'matchmaker':
-          if (_matchedPlayers.length < 2 && !_matchedPlayers.contains(player)) {
-            _matchedPlayers.add(player);
-            if (_matchedPlayers.length == 2) {
-              _nextNightAction();
-            }
-          }
-          break;
-
-        case 'seer':
-          _seerDiscoveries[player] = _playerRoles[player]?.name ?? 'Bilinmiyor';
-          _nextNightAction();
           break;
 
         case 'thief':
@@ -253,13 +270,26 @@ class _GameScreenState extends State<GameScreen> {
     });
   }
 
+  void _revealRole() {
+    if (_seerCurrentTarget != null &&
+        _playerRoles[_currentActor]?.id == 'seer') {
+      setState(() {
+        _seerDiscoveries[_seerCurrentTarget!] =
+            _playerRoles[_seerCurrentTarget!]?.name ?? 'Bilinmiyor';
+        _showCurrentSeerDiscovery = true;
+      });
+    }
+  }
+
   void _nextNightAction() {
     if (_currentNightQueue.isEmpty) return;
 
     _currentNightQueue.removeAt(0);
     setState(() {
       _selectedPlayer = null;
-      _currentTarget = null; // Yeni role geçerken hedefi temizle
+      _currentTarget = null;
+      _seerCurrentTarget = null;
+      _showCurrentSeerDiscovery = false;
       _currentActor =
           _currentNightQueue.isNotEmpty ? _currentNightQueue.first : null;
       if (_currentActor == null) {
@@ -272,17 +302,29 @@ class _GameScreenState extends State<GameScreen> {
     setState(() {
       // Kurt hedefini öldür
       if (_wolfTarget != null) {
+        bool shouldDie = true;
+
         // Doktor koruması kontrolü
-        if (_doctorTarget != _wolfTarget) {
+        if (_doctorTarget == _wolfTarget) {
+          shouldDie = false;
+        }
+
+        if (shouldDie) {
           _deadPlayers.add(_wolfTarget!);
+
+          // Eşleştirilmiş oyuncular kontrolü
+          String? matchedPartner = _getMatchedPartner(_wolfTarget!);
+          if (matchedPartner != null) {
+            // Eğer eşleştirilmiş partneri doktor tarafından korunmuyorsa öldür
+            if (_doctorTarget != matchedPartner) {
+              _deadPlayers.add(matchedPartner);
+            }
+          }
         }
       }
 
       _wolfTarget = null;
       _doctorTarget = null;
-
-      // Çöpçatan kontrolü
-      _checkMatchedPlayersDeaths();
       _isNight = false;
     });
 
@@ -556,15 +598,19 @@ class _GameScreenState extends State<GameScreen> {
               padding: EdgeInsets.all(16.0),
               child: Column(
                 children: [
-                  if (_playerRoles[_currentActor]?.id == 'wolf')
+                  Text(
+                    _playerRoles[_currentActor]?.id == 'wolf'
+                        ? 'Sıradaki rol: Kurt (${_wolfPlayers.join(", ")})'
+                        : 'Sıradaki rol: ${_playerRoles[_currentActor]?.name} ($_currentActor)',
+                    style: TextStyle(fontSize: 24),
+                    textAlign: TextAlign.center,
+                  ),
+                  if (_playerRoles[_currentActor]?.id == 'matchmaker' &&
+                      _matchedPlayers.isNotEmpty)
                     Text(
-                      'Kurtlar sırası: ${_wolfPlayers.join(", ")}',
-                      style: TextStyle(fontSize: 24),
-                    )
-                  else
-                    Text(
-                      'Sıradaki: $_currentActor (${_playerRoles[_currentActor]?.name})',
-                      style: TextStyle(fontSize: 24),
+                      'Seçilen: ${_matchedPlayers.join(", ")}',
+                      style: TextStyle(fontSize: 30, color: Colors.pink),
+                      textAlign: TextAlign.center,
                     ),
                 ],
               ),
@@ -583,28 +629,10 @@ class _GameScreenState extends State<GameScreen> {
                       (entry) => Text(
                         '${entry.key}: ${entry.value}',
                         style: TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.bold),
+                            fontSize: 40, fontWeight: FontWeight.bold),
                       ),
                     )
                     .toList(),
-              ),
-            ),
-          if (_isNight && _currentActor != null)
-            Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Text(
-                    'Sıradaki: $_currentActor (${_playerRoles[_currentActor]?.name})',
-                    style: TextStyle(fontSize: 24),
-                  ),
-                  if (_selectedPlayer != null &&
-                      _playerRoles[_currentActor]?.id == 'seer')
-                    Text(
-                      'Seçilen: $_selectedPlayer (${_playerRoles[_selectedPlayer]?.name})',
-                      style: TextStyle(fontSize: 20, color: Colors.blue),
-                    ),
-                ],
               ),
             ),
           Expanded(
@@ -628,33 +656,63 @@ class _GameScreenState extends State<GameScreen> {
                 } else if (_showRoles) {
                   playerColor =
                       _roleColors[_playerRoles[player]?.id] ?? Colors.grey;
+                } else if (_playerRoles[_currentActor]?.id == 'matchmaker' &&
+                    _matchedPlayers.contains(player)) {
+                  playerColor = Colors.brown;
                 } else if (player == _currentTarget) {
-                  // Hedef seçilmişse kahverengi yap
                   playerColor = Colors.brown;
                 } else {
                   playerColor = Colors.grey;
                 }
+
                 return GestureDetector(
                   onTap: () => _handlePlayerTap(player),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: playerColor,
-                      borderRadius: BorderRadius.circular(16.0),
-                    ),
-                    child: Center(
-                      child: Text(
-                        player,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 30,
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: playerColor,
+                          borderRadius: BorderRadius.circular(16.0),
+                        ),
+                        child: Center(
+                          child: Text(
+                            player,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 30,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      if (_showRoles && _matchedPlayers.contains(player))
+                        Positioned(
+                          top: 5,
+                          right: 5,
+                          child: Icon(
+                            Icons.favorite,
+                            color: Colors.pink,
+                            size: 20,
+                          ),
+                        ),
+                    ],
                   ),
                 );
               },
             ),
           ),
+          if (_showCurrentSeerDiscovery && _seerCurrentTarget != null)
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: Text(
+                '${_seerCurrentTarget}: ${_playerRoles[_seerCurrentTarget]?.name}',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
           if (!_rolesDistributed)
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -666,9 +724,34 @@ class _GameScreenState extends State<GameScreen> {
           if (_rolesDistributed && _isNight && _currentActor != null)
             Padding(
               padding: const EdgeInsets.all(16.0),
-              child: ElevatedButton(
-                onPressed: _nextNightAction,
-                child: Text('Sıradaki Rol'),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_playerRoles[_currentActor]?.id == 'seer' &&
+                      _seerCurrentTarget != null &&
+                      !_showCurrentSeerDiscovery)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ElevatedButton(
+                        onPressed: _revealRole,
+                        child: Text('Rolü Öğren'),
+                      ),
+                    ),
+                  if (_playerRoles[_currentActor]?.id == 'matchmaker' &&
+                      _matchedPlayers.length == 2)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8.0),
+                      child: ElevatedButton(
+                        onPressed: _nextNightAction,
+                        child: Text('Seçimi Tamamla'),
+                      ),
+                    )
+                  else
+                    ElevatedButton(
+                      onPressed: _nextNightAction,
+                      child: Text('Sıradaki Rol'),
+                    ),
+                ],
               ),
             ),
           if (_rolesDistributed && !_isNight)
